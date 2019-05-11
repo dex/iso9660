@@ -93,7 +93,7 @@ func NewFileSystem(r Reader) (*FileSystem, error) {
 		return nil, fmt.Errorf("failed to read volume descriptor: %v", err)
 	}
 
-	fs.buildCache()
+	//fs.buildCache()
 
 	return fs, nil
 }
@@ -576,15 +576,27 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 	s, e := dp.start, dp.end
 	lba := dp.lba
 
-	i := int64(0)
+	i := int64((lba - int64(f.fi.LBA)) * f.fs.r.SectorSize())
 	for {
 		if f.fi.Length != 0 && i >= int64(f.fi.Length) {
+			dp.eof = true
+			if len(fi) == 0 {
+				err = io.EOF
+				defer f.resetDir()
+			}
 			break
 		}
 
 		d, xerr := readDir(b[s:e])
 		if xerr != nil {
-			copy(b, b[s:e])
+			// Even if a directory spans multiple sectors, the
+			// directory entries are not permitted to cross the
+			// sector boundary (unlike the path table). Where there
+			// is not enough space to record an entire directory
+			// entry at the end of a sector, that sector is
+			// zero-padded and the next consecutive sector is used.
+			//copy(b, b[s:e])
+			s, e = 0, 0
 
 			var nr int
 			nr, err = f.fs.r.ReadSector(lba, b[e-s:])
@@ -600,12 +612,10 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 			lba++
 		} else {
 			if d.Siz == 0 {
-				dp.eof = true
-				if len(fi) == 0 {
-					err = io.EOF
-					defer f.resetDir()
-				}
-				break
+				// waste sector, consume all rest of bytes
+				i = int64((lba - int64(f.fi.LBA)) * f.fs.r.SectorSize())
+				s = e
+				continue
 			}
 			i += int64(d.Siz)
 			s += int(d.Siz)
