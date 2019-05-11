@@ -569,7 +569,9 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 	dp := &f.dp
 	if dp.eof {
 		f.resetDir()
-		return nil, io.EOF
+		if n > 0 {
+			return nil, io.EOF
+		}
 	}
 
 	b := dp.buf[:]
