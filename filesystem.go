@@ -3,6 +3,7 @@
 package iso9660
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -124,7 +125,7 @@ func (fs *FileSystem) Chdir(dir string) error {
 	errNotDir := &os.PathError{"chdir", dir, ErrNotDir}
 	errNotExist := &os.PathError{"chdir", dir, os.ErrNotExist}
 
-	dir = strings.ToUpper(stdpath.Join(fs.curdir, dir))
+	dir = stdpath.Join(fs.curdir, dir)
 	if dir == "." || dir == "" {
 		dir = "/"
 	}
@@ -298,7 +299,7 @@ func (fs *FileSystem) Open(name string) (*File, error) {
 		return nil, &os.PathError{"open", name, os.ErrNotExist}
 	}
 
-	xname := stdpath.Join(fs.curdir, strings.ToUpper(name))
+	xname := stdpath.Join(fs.curdir, name)
 	if f, exist := fs.files[xname]; exist {
 		return &f, nil
 	}
@@ -344,6 +345,47 @@ func (fs *FileSystem) fullPath(p path) string {
 		s = p.Name + "/" + s
 	}
 	return stdpath.Clean("/" + s)
+}
+
+// translateFilename translate names according to TRANS.TBL file
+func (fs *FileSystem) translateFilename(fi []os.FileInfo) (nfi []os.FileInfo) {
+	var transtbl map[string]string
+
+	// first pass. generate table if any
+	for _, fi := range fi {
+		if fi.Name() == "TRANS.TBL;1" {
+			transtbl = make(map[string]string)
+			d := fi.(directory)
+			f := makeFile(fs, d)
+
+			reader := bufio.NewReader(&f)
+			for {
+				line, _, err := reader.ReadLine()
+				if err == io.EOF {
+					break
+				}
+				toks := strings.Fields(string(line))
+				transtbl[toks[1]] = toks[2]
+			}
+		}
+	}
+
+	// second path, translate the name according to table
+	for _, fi := range fi {
+		d := fi.(directory)
+
+		if realname, exist := transtbl[d.Name()]; exist {
+			d.Nam = realname
+		} else {
+			d.Nam = strings.ToLower(strings.Split(d.Name(), ";")[0])
+			if d.Name() == "trans.tbl" {
+				d.Nam = strings.ToUpper(d.Name())
+			}
+		}
+		nfi = append(nfi, d)
+	}
+
+	return
 }
 
 // readPath reads one entry from the path table.
@@ -635,6 +677,8 @@ func (f *File) Readdir(n int) (fi []os.FileInfo, err error) {
 	dp.start, dp.end = s, e
 	dp.lba = lba
 
+	fi = f.fs.translateFilename(fi)
+
 	return
 }
 
@@ -667,7 +711,7 @@ func (f *File) Close() error {
 // delimited by the path separator, but it returns it last to first element.
 // An example is that "/test/foo" will return ["foo", "test"].
 func splitPath(name string) []string {
-	name = strings.ToUpper(stdpath.Clean(name))
+	name = stdpath.Clean(name)
 
 	var toks []string
 	for str := name; str != ""; {
