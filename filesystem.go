@@ -364,8 +364,17 @@ func (fs *FileSystem) translateFilename(fi []os.FileInfo) (nfi []os.FileInfo) {
 				if err == io.EOF {
 					break
 				}
-				toks := strings.Fields(string(line))
-				transtbl[toks[1]] = toks[2]
+				pos := 0
+				scanner := bufio.NewScanner(strings.NewReader(string(line)))
+				split := func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+					advance, token, err = bufio.ScanWords(data, atEOF)
+					pos += advance
+					return
+				}
+				scanner.Split(split)
+				scanner.Scan()
+				scanner.Scan()
+				transtbl[scanner.Text()] = strings.TrimSpace(string(line[pos:]))
 			}
 		}
 	}
